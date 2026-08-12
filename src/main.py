@@ -1,5 +1,4 @@
 import sys
-import time
 
 from vm_manager import (
     get_vm_status,
@@ -12,10 +11,8 @@ from vm_manager import (
     list_vms
 )
 
-from connection import (
-    connect_to_vm,
-    get_connection_info
-)
+from connection import connect_to_vm
+from launcher import launch_vm
 
 
 def main():
@@ -130,67 +127,7 @@ def main():
             return
 
     elif command == "launch":
-        vm_was_started = False
-
-        if status not in ("running", "executando"):
-            print(f"Starting VM '{vm_name}'...")
-
-            result = start_vm(vm_name)
-
-            if result.returncode != 0:
-                print(f"Error: could not start VM '{vm_name}'.")
-
-                if result.stderr:
-                    print(result.stderr.strip())
-
-                return
-
-            print("VM started successfully.")
-            vm_was_started = True
-
-        connection = get_connection_info(vm_name)
-
-        if connection is None:
-            print(
-                f"No connection configuration found "
-                f"for VM '{vm_name}'."
-            )
-            return
-
-        connection_type = connection.get("type")
-
-        if vm_was_started:
-            print("Waiting for guest network...")
-
-            max_attempts = 60
-            wait_seconds = 2
-            ip = None
-
-            for attempt in range(max_attempts):
-                ip = get_vm_ip(vm_name)
-
-                if ip:
-                    print(f"VM network available: {ip}")
-                    break
-
-                print(
-                    f"Waiting for network... "
-                    f"({attempt + 1}/{max_attempts})"
-                )
-
-                time.sleep(wait_seconds)
-
-            if not ip:
-                print("Error: VM network was not available in time.")
-                return
-
-            if connection_type == "anydesk":
-                print("Waiting for remote desktop service...")
-                time.sleep(15)
-
-        print("Opening connection...")
-
-        result = connect_to_vm(vm_name)
+        result = launch_vm(vm_name)
 
         print(result["message"])
 

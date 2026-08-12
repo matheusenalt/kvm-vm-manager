@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -e
+APP_DIR="${KVM_VM_MANAGER_HOME:-$HOME/.local/share/kvm-vm-manager}"
+PYTHON="$APP_DIR/.venv/bin/python"
+exec "$PYTHON" "$APP_DIR/src/main.py" "$@"

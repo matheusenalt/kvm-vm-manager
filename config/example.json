@@ -1,13 +1,16 @@
 {
   "win10": {
-    "type": "windows",
-    "connection": "anydesk",
-    "address": "123456789"
+    "os": "windows10",
+    "connection": "ui"
   },
-
-  "ubuntu": {
-    "type": "linux",
+  "ubuntu-server": {
+    "os": "ubuntu",
     "connection": "ssh",
-    "user": "root"
+    "user": "your-user"
+  },
+  "windows-anydesk": {
+    "os": "windows11",
+    "connection": "anydesk",
+    "address": "YOUR_ANYDESK_ID"
   }
 }

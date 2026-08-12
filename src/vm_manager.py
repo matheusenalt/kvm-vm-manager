@@ -3,54 +3,38 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from os_catalog import get_os_profile
 
 RUNNING_STATES = {"running", "executando"}
 STOPPED_STATES = {"shut off", "desligado", "desligada"}
 
-OS_VARIANT_CANDIDATES = {
-    "ubuntu": ["ubuntu24.04", "ubuntu22.04", "ubuntu20.04"],
-    "mint": ["linuxmint22", "linuxmint21.3", "ubuntu22.04"],
-    "debian": ["debian12", "debian11"],
-    "windows": ["win11", "win10"],
-}
-
 
 def run_virsh_command(command_args):
     command = ["virsh", "--connect", "qemu:///system"] + command_args
-
     try:
-        return subprocess.run(
-            command,
-            capture_output=True,
-            text=True
-        )
+        return subprocess.run(command, capture_output=True, text=True)
     except FileNotFoundError:
         return subprocess.CompletedProcess(
             command,
             127,
             stdout="",
-            stderr="virsh executable was not found in PATH."
+            stderr="virsh executable was not found in PATH.",
         )
 
 
 def get_vm_status(vm_name):
     result = run_virsh_command(["domstate", vm_name])
-
     if result.returncode != 0:
         return None
-
     return result.stdout.strip()
 
 
 def is_vm_running(vm_name_or_status):
     if vm_name_or_status is None:
         return False
-
     value = str(vm_name_or_status).strip().lower()
-
     if value in RUNNING_STATES:
         return True
-
     status = get_vm_status(value)
     return bool(status and status.strip().lower() in RUNNING_STATES)
 
@@ -58,84 +42,63 @@ def is_vm_running(vm_name_or_status):
 def is_vm_stopped(vm_name_or_status):
     if vm_name_or_status is None:
         return False
-
     value = str(vm_name_or_status).strip().lower()
-
     if value in STOPPED_STATES:
         return True
-
     status = get_vm_status(value)
     return bool(status and status.strip().lower() in STOPPED_STATES)
 
 
 def get_vm_info(vm_name):
     result = run_virsh_command(["dominfo", vm_name])
-
     if result.returncode != 0:
         return None
 
     info = {}
-
     for line in result.stdout.splitlines():
         if ":" not in line:
             continue
-
         key, value = line.split(":", 1)
         info[key.strip()] = value.strip()
-
     return info
 
 
 def get_vm_vcpus(vm_name):
     info = get_vm_info(vm_name)
-
     if info is None:
         return None
-
     return info.get("CPU(s)")
 
 
 def get_vm_ram(vm_name):
     result = run_virsh_command(["dommemstat", vm_name])
-
     if result.returncode != 0:
         return None
 
     for line in result.stdout.splitlines():
         parts = line.split()
-
-        if len(parts) != 2:
+        if len(parts) != 2 or parts[0] != "actual":
             continue
-
-        if parts[0] == "actual":
-            try:
-                memory_kib = int(parts[1])
-            except ValueError:
-                return None
-
-            memory_gb = memory_kib / 1024 / 1024
-            return f"{memory_gb:.2f} GB"
-
+        try:
+            memory_kib = int(parts[1])
+        except ValueError:
+            return None
+        return f"{memory_kib / 1024 / 1024:.2f} GB"
     return None
 
 
 def get_vm_ip(vm_name):
     result = run_virsh_command(["domifaddr", vm_name])
-
     if result.returncode != 0:
         return None
 
     for line in result.stdout.splitlines():
         parts = line.split()
-
         if len(parts) < 4:
             continue
-
         address = parts[-1]
-
         if "/" in address and "." in address:
             return address.split("/")[0]
-
     return None
 
 
@@ -153,128 +116,94 @@ def reboot_vm(vm_name):
 
 def list_vms():
     result = run_virsh_command(["list", "--all", "--name"])
-
     if result.returncode != 0:
         return []
-
-    return [
-        line.strip()
-        for line in result.stdout.splitlines()
-        if line.strip()
-    ]
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def get_vm_snapshot(vm_name):
     status = get_vm_status(vm_name)
-
     if status is None:
         return None
-
-    vcpus = get_vm_vcpus(vm_name)
-    ram = get_vm_ram(vm_name)
-    ip = None
-
-    if status.strip().lower() in RUNNING_STATES:
-        ip = get_vm_ip(vm_name)
 
     return {
         "name": vm_name,
         "status": status,
-        "vcpus": vcpus,
-        "ram": ram,
-        "ip": ip
+        "vcpus": get_vm_vcpus(vm_name),
+        "ram": get_vm_ram(vm_name),
+        "ip": get_vm_ip(vm_name) if status.strip().lower() in RUNNING_STATES else None,
     }
 
 
 def get_all_vms_info():
-    all_vms = []
-
+    result = []
     for vm_name in list_vms():
-        vm_data = get_vm_snapshot(vm_name)
-
-        if vm_data is not None:
-            all_vms.append(vm_data)
-
-    return all_vms
+        snapshot = get_vm_snapshot(vm_name)
+        if snapshot is not None:
+            result.append(snapshot)
+    return result
 
 
-def _available_os_variants():
-    if shutil.which("osinfo-query") is None:
-        return set()
+def get_available_os_variants():
+    commands = [
+        ["virt-install", "--osinfo", "list"],
+        ["osinfo-query", "os", "--fields", "short-id"],
+    ]
 
-    try:
-        result = subprocess.run(
-            ["osinfo-query", "os", "--fields", "short-id"],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-    except OSError:
-        return set()
-
-    if result.returncode != 0:
-        return set()
-
-    variants = set()
-    for line in result.stdout.splitlines():
-        value = line.strip()
-        if not value or value.startswith("Short ID") or set(value) == {"-"}:
+    for command in commands:
+        if shutil.which(command[0]) is None:
             continue
-        variants.add(value.split()[0])
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except OSError:
+            continue
+        if result.returncode != 0:
+            continue
 
-    return variants
+        variants = set()
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line or line.lower().startswith("short id") or set(line) == {"-"}:
+                continue
+            value = line.split()[0]
+            if re.fullmatch(r"[A-Za-z0-9._+-]+", value):
+                variants.add(value)
+        if variants:
+            return sorted(variants)
+
+    return []
 
 
 def _select_os_variant(os_name):
-    os_name = str(os_name).strip().lower()
-    candidates = OS_VARIANT_CANDIDATES.get(os_name, [])
-    available = _available_os_variants()
+    profile = get_os_profile(os_name)
+    available = get_available_os_variants()
+    if not available:
+        return None
 
-    if available:
-        for candidate in candidates:
-            if candidate in available:
-                return candidate
-
-    # 'generic' is broadly supported and keeps creation portable when the
-    # host's osinfo database differs from the developer's machine.
-    return "generic"
+    lowered = [(item, item.lower()) for item in available]
+    for prefix in profile.get("prefixes", []):
+        matches = [item for item, low in lowered if low == prefix or low.startswith(prefix)]
+        if matches:
+            return sorted(matches, reverse=True)[0]
+    return None
 
 
 def create_vm(name, os_name, vcpus, ram_gb, disk_gb, iso_path):
-    """Create and start a VM through virt-install.
-
-    This function is intentionally synchronous. The GUI calls it from a
-    worker thread so Tk's main loop never blocks.
-    """
     name = str(name or "").strip()
-    os_name = str(os_name or "").strip().lower()
+    profile = get_os_profile(os_name)
     iso = Path(str(iso_path or "")).expanduser()
 
     if not name:
-        return {
-            "success": False,
-            "message": "VM name cannot be empty."
-        }
+        return {"success": False, "message": "VM name cannot be empty."}
 
     if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
         return {
             "success": False,
-            "message": (
-                "VM name may contain only letters, numbers, '.', '_' and '-'."
-            )
+            "message": "VM name may contain only letters, numbers, '.', '_' and '-'.",
         }
 
     if get_vm_status(name) is not None:
-        return {
-            "success": False,
-            "message": f"A VM named '{name}' already exists."
-        }
-
-    if os_name not in {"ubuntu", "mint", "debian", "windows"}:
-        return {
-            "success": False,
-            "message": f"Unsupported operating system '{os_name}'."
-        }
+        return {"success": False, "message": f"A VM named '{name}' already exists."}
 
     try:
         vcpus = int(vcpus)
@@ -283,42 +212,36 @@ def create_vm(name, os_name, vcpus, ram_gb, disk_gb, iso_path):
     except (TypeError, ValueError):
         return {
             "success": False,
-            "message": "vCPU, RAM and disk size must be whole numbers."
+            "message": "vCPU, RAM and disk size must be whole numbers.",
         }
 
     if not 1 <= vcpus <= 64:
         return {"success": False, "message": "vCPU must be between 1 and 64."}
-
     if not 1 <= ram_gb <= 512:
         return {"success": False, "message": "RAM must be between 1 and 512 GB."}
-
     if not 1 <= disk_gb <= 4096:
         return {"success": False, "message": "Disk size must be between 1 and 4096 GB."}
-
     if not iso.is_file():
-        return {
-            "success": False,
-            "message": f"ISO file was not found: {iso}"
-        }
-
+        return {"success": False, "message": f"ISO file was not found: {iso}"}
     if shutil.which("virt-install") is None:
         return {
             "success": False,
-            "message": (
-                "virt-install was not found in PATH. Install the virt-install "
-                "package before creating VMs."
-            )
+            "message": "virt-install was not found in PATH.",
         }
 
-    os_variant = _select_os_variant(os_name)
+    family = profile.get("family", "linux")
+    os_variant = _select_os_variant(profile["id"])
     memory_mb = ram_gb * 1024
 
-    if os_name == "windows":
-        disk_bus = "sata"
-        network_model = "e1000e"
-    else:
-        disk_bus = "virtio"
-        network_model = "virtio"
+    disk_bus = "sata" if family == "windows" else "virtio"
+    network_model = "e1000e" if family == "windows" else "virtio"
+    video_model = "vga" if family == "windows" else "virtio"
+
+    osinfo_value = (
+        f"detect=on,name={os_variant}"
+        if os_variant
+        else "detect=on,require=off"
+    )
 
     command = [
         "virt-install",
@@ -330,37 +253,29 @@ def create_vm(name, os_name, vcpus, ram_gb, disk_gb, iso_path):
         "--cdrom", str(iso.resolve()),
         "--network", f"network=default,model={network_model}",
         "--graphics", "spice",
-        "--video", "virtio" if os_name != "windows" else "vga",
-        "--osinfo", f"detect=on,name={os_variant}",
+        "--video", video_model,
+        "--osinfo", osinfo_value,
         "--noautoconsole",
     ]
 
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
     except OSError as error:
         return {
             "success": False,
             "message": f"Could not execute virt-install: {error}",
-            "command": command
+            "command": command,
         }
 
     if result.returncode != 0:
-        error_message = result.stderr.strip() or result.stdout.strip()
-        return {
-            "success": False,
-            "message": error_message or "virt-install failed.",
-            "command": command
-        }
+        message = result.stderr.strip() or result.stdout.strip() or "virt-install failed."
+        return {"success": False, "message": message, "command": command}
 
     return {
         "success": True,
         "message": f"VM '{name}' was created successfully.",
         "command": command,
         "stdout": result.stdout.strip(),
-        "os_variant": os_variant
+        "os_variant": os_variant,
+        "os_profile": profile["id"],
     }

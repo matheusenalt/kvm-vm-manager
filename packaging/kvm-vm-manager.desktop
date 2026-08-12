@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KVM VM Manager
+Comment=Manage local KVM/libvirt virtual machines
+Exec=kvm-vm-manager
+Icon=computer
+Terminal=false
+Categories=System;Utility;
+StartupNotify=true

@@ -1,48 +1,53 @@
 import sys
 
+from connection import connect_to_vm
+from desktop_shortcuts import create_widget_shortcut
+from launcher import launch_vm
 from vm_manager import (
     RUNNING_STATES,
     STOPPED_STATES,
     get_all_vms_info,
+    get_available_os_variants,
     get_vm_ip,
     get_vm_ram,
     get_vm_status,
     get_vm_vcpus,
     reboot_vm,
     shutdown_vm,
-    start_vm
+    start_vm,
 )
-
-from connection import connect_to_vm
-from launcher import launch_vm
 
 
 def print_usage():
     print("Usage:")
-    print("  python src/main.py list")
-    print("  python src/main.py <vm_name> <command>")
-    print("  python src/main.py <vm_name> --widget")
+    print("  kvm-vm-manager")
+    print("  kvm-vm-manager list")
+    print("  kvm-vm-manager list-os")
+    print("  kvm-vm-manager <vm_name> <command>")
+    print("  kvm-vm-manager <vm_name> --widget")
     print()
     print("Commands:")
-    print("  list")
     print("  status")
     print("  start")
     print("  shutdown")
     print("  reboot")
     print("  connect")
     print("  launch")
+    print("  shortcut")
     print("  --widget")
+
+
+def open_gui():
+    from ui.main_window import VMManagerApp
+    app = VMManagerApp()
+    app.mainloop()
 
 
 def show_vm_list():
     vms = get_all_vms_info()
-
     if not vms:
         print("No virtual machines found.")
         return
-
-    print("Virtual Machines:")
-    print()
 
     for vm in vms:
         print(f"Name: {vm['name']}")
@@ -53,33 +58,25 @@ def show_vm_list():
         print()
 
 
+def show_os_list():
+    variants = get_available_os_variants()
+    if not variants:
+        print("No libosinfo variants were found.")
+        return
+    for variant in variants:
+        print(variant)
+
+
 def open_widget(vm_name):
     if get_vm_status(vm_name) is None:
         print(f"Error: VM '{vm_name}' was not found.")
         return
-
-    # Lazy import keeps CLI-only usage independent from GUI startup.
-    from gui import run_widget
+    from widget import run_widget
     run_widget(vm_name)
 
 
-def main():
-    if len(sys.argv) == 2 and sys.argv[1].lower() == "list":
-        show_vm_list()
-        return
-
-    if len(sys.argv) == 3 and sys.argv[2].lower() == "--widget":
-        open_widget(sys.argv[1])
-        return
-
-    if len(sys.argv) < 3:
-        print_usage()
-        return
-
-    vm_name = sys.argv[1]
-    command = sys.argv[2].lower()
+def run_vm_command(vm_name, command):
     status = get_vm_status(vm_name)
-
     if status is None:
         print(f"Error: VM '{vm_name}' was not found.")
         return
@@ -87,72 +84,77 @@ def main():
     normalized_status = status.strip().lower()
 
     if command == "status":
-        vcpus = get_vm_vcpus(vm_name)
-        ram = get_vm_ram(vm_name)
-        ip = get_vm_ip(vm_name)
-
         print(f"VM: {vm_name}")
         print(f"Status: {status}")
-        print(f"vCPU: {vcpus or 'Unknown'}")
-        print(f"RAM: {ram or 'Unknown'}")
-        print(f"IP: {ip or 'Unknown'}")
+        print(f"vCPU: {get_vm_vcpus(vm_name) or 'Unknown'}")
+        print(f"RAM: {get_vm_ram(vm_name) or 'Unknown'}")
+        print(f"IP: {get_vm_ip(vm_name) or 'Unknown'}")
+        return
 
-    elif command == "start":
+    if command == "start":
         if normalized_status in RUNNING_STATES:
             print(f"VM '{vm_name}' is already running.")
             return
-
         result = start_vm(vm_name)
+        print(result.stderr.strip() if result.returncode != 0 else f"VM '{vm_name}' started successfully.")
+        return
 
-        if result.returncode != 0:
-            print(f"Error: could not start VM '{vm_name}'.")
-            if result.stderr:
-                print(result.stderr.strip())
-            return
-
-        print(f"VM '{vm_name}' started successfully.")
-
-    elif command == "shutdown":
+    if command == "shutdown":
         if normalized_status in STOPPED_STATES:
             print(f"VM '{vm_name}' is already powered off.")
             return
-
         result = shutdown_vm(vm_name)
+        print(result.stderr.strip() if result.returncode != 0 else f"Shutdown signal sent to VM '{vm_name}'.")
+        return
 
-        if result.returncode != 0:
-            print(f"Error: could not shutdown VM '{vm_name}'.")
-            if result.stderr:
-                print(result.stderr.strip())
-            return
-
-        print(f"Shutdown signal sent to VM '{vm_name}'.")
-
-    elif command == "reboot":
+    if command == "reboot":
         if normalized_status in STOPPED_STATES:
             print(f"Error: VM '{vm_name}' is powered off.")
             return
-
         result = reboot_vm(vm_name)
+        print(result.stderr.strip() if result.returncode != 0 else f"Reboot signal sent to VM '{vm_name}'.")
+        return
 
-        if result.returncode != 0:
-            print(f"Error: could not reboot VM '{vm_name}'.")
-            if result.stderr:
-                print(result.stderr.strip())
-            return
+    if command == "connect":
+        print(connect_to_vm(vm_name)["message"])
+        return
 
-        print(f"Reboot signal sent to VM '{vm_name}'.")
+    if command == "launch":
+        print(launch_vm(vm_name)["message"])
+        return
 
-    elif command == "connect":
-        result = connect_to_vm(vm_name)
-        print(result["message"])
+    if command == "shortcut":
+        print(create_widget_shortcut(vm_name)["message"])
+        return
 
-    elif command == "launch":
-        result = launch_vm(vm_name)
-        print(result["message"])
+    print(f"Error: unknown command '{command}'.")
+    print_usage()
 
-    else:
-        print(f"Error: unknown command '{command}'.")
-        print_usage()
+
+def main():
+    args = sys.argv[1:]
+
+    if not args or args == ["gui"]:
+        open_gui()
+        return
+
+    if len(args) == 1 and args[0].lower() == "list":
+        show_vm_list()
+        return
+
+    if len(args) == 1 and args[0].lower() == "list-os":
+        show_os_list()
+        return
+
+    if len(args) == 2 and args[1].lower() == "--widget":
+        open_widget(args[0])
+        return
+
+    if len(args) == 2:
+        run_vm_command(args[0], args[1].lower())
+        return
+
+    print_usage()
 
 
 if __name__ == "__main__":

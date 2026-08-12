@@ -1,133 +1,53 @@
 import sys
-import subprocess
+import time
 
+from vm_manager import (
+    get_vm_status,
+    get_vm_vcpus,
+    get_vm_ram,
+    get_vm_ip,
+    start_vm,
+    shutdown_vm,
+    reboot_vm,
+    list_vms
+)
 
-def run_virsh_command(command_args):
-    result = subprocess.run(
-        ["virsh", "--connect", "qemu:///system"] + command_args,
-        capture_output=True,
-        text=True
-    )
-
-    return result
-
-
-def get_vm_status(vm_name):
-    result = run_virsh_command(
-        ["domstate", vm_name]
-    )
-
-    if result.returncode != 0:
-        return None
-
-    return result.stdout.strip()
-
-
-def get_vm_info(vm_name):
-    result = run_virsh_command(
-        ["dominfo", vm_name]
-    )
-
-    if result.returncode != 0:
-        return None
-
-    info = {}
-
-    for line in result.stdout.splitlines():
-        if ":" not in line:
-            continue
-
-        key, value = line.split(":", 1)
-        info[key.strip()] = value.strip()
-
-    return info
-
-
-def get_vm_vcpus(vm_name):
-    info = get_vm_info(vm_name)
-
-    if info is None:
-        return None
-
-    return info.get("CPU(s)")
-
-
-def get_vm_ram(vm_name):
-    result = run_virsh_command(
-        ["dommemstat", vm_name]
-    )
-
-    if result.returncode != 0:
-        return None
-
-    for line in result.stdout.splitlines():
-        parts = line.split()
-
-        if len(parts) != 2:
-            continue
-
-        if parts[0] == "actual":
-            try:
-                memory_kib = int(parts[1])
-            except ValueError:
-                return None
-
-            memory_gb = memory_kib / 1024 / 1024
-
-            return f"{memory_gb:.2f} GB"
-
-    return None
-
-
-def get_vm_ip(vm_name):
-    result = run_virsh_command(
-        ["domifaddr", vm_name]
-    )
-
-    if result.returncode != 0:
-        return None
-
-    for line in result.stdout.splitlines():
-        parts = line.split()
-
-        if len(parts) < 4:
-            continue
-
-        address = parts[-1]
-
-        if "/" in address and "." in address:
-            return address.split("/")[0]
-
-    return None
-
-
-def start_vm(vm_name):
-    return run_virsh_command(
-        ["start", vm_name]
-    )
-
-
-def shutdown_vm(vm_name):
-    return run_virsh_command(
-        ["shutdown", vm_name]
-    )
-
-
-def reboot_vm(vm_name):
-    return run_virsh_command(
-        ["reboot", vm_name]
-    )
+from connection import (
+    connect_to_vm,
+    get_connection_info
+)
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1].lower() == "list":
+        vms = list_vms()
+
+        if not vms:
+            print("No virtual machines found.")
+            return
+
+        print("Virtual Machines:")
+        print()
+
+        for vm_name in vms:
+            status = get_vm_status(vm_name)
+            print(f"{vm_name}: {status}")
+
+        return
+
     if len(sys.argv) < 3:
-        print("Usage: python src/main.py <vm_name> <command>")
+        print("Usage:")
+        print("  python src/main.py list")
+        print("  python src/main.py <vm_name> <command>")
         print()
         print("Commands:")
+        print("  list")
         print("  status")
         print("  start")
         print("  shutdown")
         print("  reboot")
+        print("  connect")
+        print("  launch")
         return
 
     vm_name = sys.argv[1]
@@ -201,6 +121,82 @@ def main():
 
         print(f"Reboot signal sent to VM '{vm_name}'.")
 
+    elif command == "connect":
+        result = connect_to_vm(vm_name)
+
+        print(result["message"])
+
+        if not result["success"]:
+            return
+
+    elif command == "launch":
+        vm_was_started = False
+
+        if status not in ("running", "executando"):
+            print(f"Starting VM '{vm_name}'...")
+
+            result = start_vm(vm_name)
+
+            if result.returncode != 0:
+                print(f"Error: could not start VM '{vm_name}'.")
+
+                if result.stderr:
+                    print(result.stderr.strip())
+
+                return
+
+            print("VM started successfully.")
+            vm_was_started = True
+
+        connection = get_connection_info(vm_name)
+
+        if connection is None:
+            print(
+                f"No connection configuration found "
+                f"for VM '{vm_name}'."
+            )
+            return
+
+        connection_type = connection.get("type")
+
+        if vm_was_started:
+            print("Waiting for guest network...")
+
+            max_attempts = 60
+            wait_seconds = 2
+            ip = None
+
+            for attempt in range(max_attempts):
+                ip = get_vm_ip(vm_name)
+
+                if ip:
+                    print(f"VM network available: {ip}")
+                    break
+
+                print(
+                    f"Waiting for network... "
+                    f"({attempt + 1}/{max_attempts})"
+                )
+
+                time.sleep(wait_seconds)
+
+            if not ip:
+                print("Error: VM network was not available in time.")
+                return
+
+            if connection_type == "anydesk":
+                print("Waiting for remote desktop service...")
+                time.sleep(15)
+
+        print("Opening connection...")
+
+        result = connect_to_vm(vm_name)
+
+        print(result["message"])
+
+        if not result["success"]:
+            return
+
     else:
         print(f"Error: unknown command '{command}'.")
         print()
@@ -209,6 +205,8 @@ def main():
         print("  start")
         print("  shutdown")
         print("  reboot")
+        print("  connect")
+        print("  launch")
 
 
 if __name__ == "__main__":

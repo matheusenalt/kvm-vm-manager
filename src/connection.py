@@ -6,9 +6,14 @@ from vm_manager import get_vm_ip
 
 
 def load_vm_config():
-    config_path = Path("config/example.json")
+    config_path = Path("config/config.json")
 
     if not config_path.exists():
+        print(
+            "Configuration file not found.\n"
+            "Create 'config/config.json' based on "
+            "'config/example.json'."
+        )
         return {}
 
     try:
@@ -52,7 +57,10 @@ def connect_to_vm(vm_name):
     if connection is None:
         return {
             "success": False,
-            "message": f"No connection configuration found for VM '{vm_name}'."
+            "message": (
+                f"No connection configuration found "
+                f"for VM '{vm_name}'."
+            )
         }
 
     if connection["type"] == "ssh":
@@ -77,7 +85,10 @@ def connect_to_vm(vm_name):
 
         return {
             "success": True,
-            "message": f"SSH connection closed for {user}@{host}."
+            "message": (
+                f"SSH connection closed for "
+                f"{user}@{host}."
+            )
         }
 
     if connection["type"] == "anydesk":
@@ -89,13 +100,26 @@ def connect_to_vm(vm_name):
                 "message": "AnyDesk address is not configured."
             }
 
-        subprocess.Popen(
-            ["anydesk", address]
-        )
+        try:
+            subprocess.Popen(
+                ["anydesk", address]
+            )
+
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "message": (
+                    "AnyDesk executable was not found "
+                    "in the system PATH."
+                )
+            }
 
         return {
             "success": True,
-            "message": f"Opening AnyDesk connection to {address}."
+            "message": (
+                f"Opening AnyDesk connection to "
+                f"{address}."
+            )
         }
 
     return {

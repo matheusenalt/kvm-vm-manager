@@ -8,6 +8,6 @@
   "ubuntu": {
     "type": "linux",
     "connection": "ssh",
-    "user": "root","
+    "user": "root"
   }
 }

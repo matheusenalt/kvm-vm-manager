@@ -100,6 +100,7 @@ def shutdown_vm(vm_name):
 def reboot_vm(vm_name):
     return run_virsh_command(["reboot", vm_name])
 
+
 def list_vms():
     result = run_virsh_command(
         ["list", "--all", "--name"]
@@ -116,4 +117,32 @@ def list_vms():
         if vm_name:
             vms.append(vm_name)
 
-    return vms    
+    return vms
+
+
+def get_all_vms_info():
+    vm_names = list_vms()
+
+    all_vms = []
+
+    for vm_name in vm_names:
+        status = get_vm_status(vm_name)
+        vcpus = get_vm_vcpus(vm_name)
+        ram = get_vm_ram(vm_name)
+
+        ip = None
+
+        if status in ("running", "executando"):
+            ip = get_vm_ip(vm_name)
+
+        vm_data = {
+            "name": vm_name,
+            "status": status,
+            "vcpus": vcpus,
+            "ram": ram,
+            "ip": ip
+        }
+
+        all_vms.append(vm_data)
+
+    return all_vms

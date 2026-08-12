@@ -8,7 +8,7 @@ from vm_manager import (
     start_vm,
     shutdown_vm,
     reboot_vm,
-    list_vms
+    get_all_vms_info
 )
 
 from connection import connect_to_vm
@@ -17,7 +17,7 @@ from launcher import launch_vm
 
 def main():
     if len(sys.argv) == 2 and sys.argv[1].lower() == "list":
-        vms = list_vms()
+        vms = get_all_vms_info()
 
         if not vms:
             print("No virtual machines found.")
@@ -26,9 +26,13 @@ def main():
         print("Virtual Machines:")
         print()
 
-        for vm_name in vms:
-            status = get_vm_status(vm_name)
-            print(f"{vm_name}: {status}")
+        for vm in vms:
+            print(f"Name: {vm['name']}")
+            print(f"Status: {vm['status']}")
+            print(f"vCPU: {vm['vcpus'] if vm['vcpus'] is not None else 'Unknown'}")
+            print(f"RAM: {vm['ram'] if vm['ram'] is not None else 'Unknown'}")
+            print(f"IP: {vm['ip'] if vm['ip'] is not None else 'Unknown'}")
+            print()
 
         return
 

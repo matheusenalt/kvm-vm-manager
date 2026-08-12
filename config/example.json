@@ -2,13 +2,12 @@
   "win10": {
     "type": "windows",
     "connection": "anydesk",
-    "address": "1273237763"
+    "address": "123456789"
   },
 
   "ubuntu": {
     "type": "linux",
     "connection": "ssh",
-    "user": "senax",
-    "host": "192.168.122.50"
+    "user": "root","
   }
 }

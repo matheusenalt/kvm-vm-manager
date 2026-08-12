@@ -1,8 +1,9 @@
 import time
 
 from vm_manager import (
-    get_vm_status,
+    RUNNING_STATES,
     get_vm_ip,
+    get_vm_status,
     start_vm
 )
 
@@ -12,75 +13,206 @@ from connection import (
 )
 
 
+def wait_for_guest_network(
+    vm_name,
+    max_attempts=60,
+    wait_seconds=2
+):
+    for attempt in range(
+        max_attempts
+    ):
+        ip = get_vm_ip(
+            vm_name
+        )
+
+        if ip:
+            print(
+                f"VM network available: {ip}"
+            )
+
+            return ip
+
+        print(
+            "Waiting for network... "
+            f"({attempt + 1}/"
+            f"{max_attempts})"
+        )
+
+        time.sleep(
+            wait_seconds
+        )
+
+    return None
+
+
 def launch_vm(vm_name):
-    status = get_vm_status(vm_name)
+    status = get_vm_status(
+        vm_name
+    )
 
     if status is None:
         return {
             "success": False,
-            "message": f"VM '{vm_name}' was not found."
+            "message": (
+                f"VM '{vm_name}' "
+                "was not found."
+            )
         }
 
-    vm_was_started = False
-
-    if status not in ("running", "executando"):
-        print(f"Starting VM '{vm_name}'...")
-
-        result = start_vm(vm_name)
-
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "message": f"Could not start VM '{vm_name}'."
-            }
-
-        print("VM started successfully.")
-        vm_was_started = True
-
-    connection = get_connection_info(vm_name)
+    connection = get_connection_info(
+        vm_name
+    )
 
     if connection is None:
         return {
             "success": False,
             "message": (
-                f"No connection configuration found "
-                f"for VM '{vm_name}'."
+                "No connection configuration "
+                f"found for VM '{vm_name}'."
             )
         }
 
-    connection_type = connection.get("type")
+    if connection.get("error"):
+        return {
+            "success": False,
+            "message": connection[
+                "error"
+            ]
+        }
 
-    if vm_was_started:
-        print("Waiting for guest network...")
+    connection_type = (
+        connection.get("type")
+    )
 
-        max_attempts = 60
-        wait_seconds = 2
-        ip = None
+    normalized_status = (
+        status.strip().lower()
+    )
 
-        for attempt in range(max_attempts):
-            ip = get_vm_ip(vm_name)
+    vm_was_started = False
 
-            if ip:
-                print(f"VM network available: {ip}")
-                break
+    # =====================================================
+    # START VM
+    # =====================================================
 
-            print(
-                f"Waiting for network... "
-                f"({attempt + 1}/{max_attempts})"
+    if normalized_status not in (
+        RUNNING_STATES
+    ):
+        print(
+            f"Starting VM '{vm_name}'..."
+        )
+
+        result = start_vm(
+            vm_name
+        )
+
+        if result.returncode != 0:
+            error = (
+                result.stderr.strip()
+                if result.stderr
+                else ""
             )
 
-            time.sleep(wait_seconds)
+            return {
+                "success": False,
+                "message": (
+                    f"Could not start "
+                    f"VM '{vm_name}'. "
+                    f"{error}"
+                ).strip()
+            }
+
+        vm_was_started = True
+
+        print(
+            "VM started successfully."
+        )
+
+    # =====================================================
+    # SSH
+    # =====================================================
+
+    if (
+        vm_was_started
+        and connection_type == "ssh"
+        and connection.get(
+            "dynamic_host",
+            True
+        )
+    ):
+        print(
+            "Waiting for guest network..."
+        )
+
+        ip = wait_for_guest_network(
+            vm_name
+        )
 
         if not ip:
             return {
                 "success": False,
-                "message": "VM network was not available in time."
+                "message": (
+                    "VM network was not "
+                    "available in time."
+                )
             }
 
-        if connection_type == "anydesk":
-            print("Waiting for remote desktop service...")
-            time.sleep(15)
+    # =====================================================
+    # ANYDESK
+    # =====================================================
 
-    print("Opening connection...")
+    if (
+        vm_was_started
+        and connection_type == "anydesk"
+    ):
+        print(
+            "Waiting for guest network..."
+        )
 
-    return connect_to_vm(vm_name)
+        ip = wait_for_guest_network(
+            vm_name
+        )
+
+        if not ip:
+            return {
+                "success": False,
+                "message": (
+                    "VM network was not "
+                    "available in time."
+                )
+            }
+
+        print(
+            "Waiting for AnyDesk..."
+        )
+
+        time.sleep(
+            15
+        )
+
+    # =====================================================
+    # UI / VIRT-VIEWER
+    # =====================================================
+
+    # virt-viewer não precisa esperar IP.
+    # Ele conecta diretamente ao libvirt.
+    if connection_type == "ui":
+        print(
+            "Opening virt-viewer..."
+        )
+
+        return connect_to_vm(
+            vm_name
+        )
+
+    # =====================================================
+    # OTHER CONNECTIONS
+    # =====================================================
+
+    print(
+        f"Opening {connection_type} "
+        "connection..."
+    )
+
+    return connect_to_vm(
+        vm_name
+    )
